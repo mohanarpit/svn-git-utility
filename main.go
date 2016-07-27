@@ -2,45 +2,60 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
 
 	cmap "github.com/streamrail/concurrent-map"
+	cli "github.com/urfave/cli"
 )
 
 func main() {
-	args := os.Args
-	if len(args) < 2 {
-		log.Fatalln("Mandatory arguments missing.")
+	app := cli.NewApp()
+	app.Name = "svn-git-utility"
+	app.Usage = "Migrate from svn to git"
+	app.Commands = []cli.Command{
+		cli.Command{
+			Name:        "authors",
+			Description: "Will print the list of authors to a filename",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "filename",
+					Value: "authorstxt",
+					Usage: "The filename to which the authors will be written into",
+				},
+				cli.StringFlag{
+					Name:  "domain",
+					Value: "foo.com",
+					Usage: "The domain for the email addresses of authors",
+				},
+				cli.StringFlag{
+					Name:  "repo",
+					Value: "/home/svn/",
+					Usage: "The location of the SVN repo on the local FS",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				fmt.Println(c.String("filename"))
+				return printSvnAuthors(c.String("filename"), c.String("domain"), c.String("repo"))
+			},
+		},
+
+		cli.Command{
+			Name:        "verify",
+			Description: "Will verify if the correct versions of tools are installed",
+			Action: func(c *cli.Context) error {
+				fmt.Println(c.String("filename"))
+				return printSvnAuthors(c.String("filename"), c.String("domain"), c.String("repo"))
+			},
+		},
 	}
 
-	command := args[1]
-	switch command {
-	case "authors":
-		var (
-			authorFileName = flag.String("filename", "authors.txt",
-				"The filename to which the authors will be written into")
-			domain = flag.String("domain", "foo.com",
-				"The domain for the email addresses of authors")
-			svnRepo = flag.String("repo", "/home/svn/repo",
-				"The location of the SVN repo on the local FS")
-		)
-		flag.Parse()
-
-		err := printSvnAuthors(*authorFileName, *domain, *svnRepo)
-		if err != nil {
-			log.Fatalf("error while fetching authors: %v", err)
-		}
-	default:
-		log.Fatalln("Invalid command")
-	}
+	app.Run(os.Args)
 }
 
-func printSvnAuthors(authorFileName string, domain string, svnRepo string) error {
+func printSvnAuthors(authorFileName, domain, svnRepo string) error {
 	cmd := exec.Command("svn", "log", "--quiet")
 	cmd.Dir = svnRepo
 	stdout, err := cmd.StdoutPipe()
