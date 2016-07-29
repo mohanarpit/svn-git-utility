@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -87,7 +88,7 @@ func verifyCommand() error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(len(tools))
+	wg.Add(len(tools) + 1)
 
 	errChan := make(chan error)
 	go func() {
@@ -102,11 +103,21 @@ func verifyCommand() error {
 		}
 	}()
 
+	go checkConnectivity(errChan)
 	for _, tool := range tools {
 		go verify(tool, errChan)
 	}
 	wg.Wait()
 	return nil
+}
+
+func checkConnectivity(errChan chan error) {
+	conn, err := net.Dial("tcp", "google.com:80")
+	if err != nil {
+		errChan <- fmt.Errorf("Unable to connect to the internet. Please check your connectivity")
+		return
+	}
+	defer conn.Close()
 }
 
 func verify(dep Dependency, errChan chan error) {
