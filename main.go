@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
+	"sync"
 
 	cmap "github.com/streamrail/concurrent-map"
 	cli "github.com/urfave/cli"
@@ -38,7 +41,7 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				fmt.Println(c.String("filename"))
-				return printSvnAuthors(c.String("filename"), c.String("domain"), c.String("repo"))
+				return printAuthorsCommand(c.String("filename"), c.String("domain"), c.String("repo"))
 			},
 		},
 
@@ -46,16 +49,95 @@ func main() {
 			Name:        "verify",
 			Description: "Will verify if the correct versions of tools are installed",
 			Action: func(c *cli.Context) error {
-				fmt.Println(c.String("filename"))
-				return printSvnAuthors(c.String("filename"), c.String("domain"), c.String("repo"))
+				return verifyCommand()
 			},
 		},
 	}
-
 	app.Run(os.Args)
 }
 
-func printSvnAuthors(authorFileName, domain, svnRepo string) error {
+type Dependency struct {
+	Name            string
+	RequiredVersion string
+	Cmd             string
+}
+
+type DependencyOutput struct {
+	Dependency
+	Output string
+}
+
+func verifyCommand() error {
+	tools := []Dependency{
+		{
+			Name:            "Git",
+			RequiredVersion: "1.7.7.5",
+			Cmd:             "git",
+		},
+		{
+			Name:            "svn",
+			RequiredVersion: "1.6.17",
+			Cmd:             "svn",
+		},
+		{
+			Name:            "git-svn",
+			RequiredVersion: "1.7.7.5",
+			Cmd:             "git svn",
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(tools))
+
+	errChan := make(chan error)
+	go func() {
+		for {
+			select {
+			case err := <-errChan:
+				if err != nil {
+					fmt.Println(err)
+				}
+				wg.Done()
+			}
+		}
+	}()
+
+	for _, tool := range tools {
+		go verify(tool, errChan)
+	}
+	wg.Wait()
+	return nil
+}
+
+func verify(dep Dependency, errChan chan error) {
+	var stdout []byte
+	var err error
+	//Explicitly making this distinction because exec.Command doesn't work when there's a space separated string
+	//It assumes that the space separated string is an entire command and not a command + argument
+	//TODO: Figure out how this can be cleaned up
+	if dep.Name == "git-svn" {
+		stdout, err = exec.Command("git", "svn", "--version").Output()
+	} else {
+		stdout, err = exec.Command(dep.Cmd, "--version").Output()
+	}
+
+	if err != nil {
+		errChan <- err
+		return
+	}
+	//Get the first line
+	firstLine := bytes.Split(stdout, []byte("\n"))[0]
+	re := regexp.MustCompile(`version ([0-9.]+)`)
+	match := re.FindStringSubmatch(string(firstLine))
+	version := match[1]
+	if version < dep.RequiredVersion {
+		errChan <- fmt.Errorf("Sorry, the installed version for %s is less than the required version %s", dep.Name, dep.RequiredVersion)
+		return
+	}
+	errChan <- nil
+}
+
+func printAuthorsCommand(authorFileName, domain, svnRepo string) error {
 	cmd := exec.Command("svn", "log", "--quiet")
 	cmd.Dir = svnRepo
 	stdout, err := cmd.StdoutPipe()
